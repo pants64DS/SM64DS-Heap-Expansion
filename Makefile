@@ -36,23 +36,25 @@ export LD      := $(PREFIX)ld
 #---------------------------------------------------------------------------------
 TARGET   := newcode
 BUILD    := build
-SOURCES  := source
+SOURCES  := source glibc
 INCLUDES := ../dynamic_lib/source ../source ..
 
+ARCHFLAGS := -march=armv5te -mtune=arm946e-s
+
 CFLAGS := -Wall -Wextra -Werror -Wno-unused-parameter -Wno-narrowing \
-	-Wno-parentheses -Wno-volatile -Wno-invalid-offsetof -Wno-char-subscripts \
-	-Os -march=armv5te -mtune=arm946e-s -fomit-frame-pointer -fwrapv \
-	$(INCLUDE) -DARM9 -nodefaultlibs -fno-builtin -c
+	-Wno-parentheses -Wno-volatile -Wno-invalid-offsetof -Wno-char-subscripts -Wno-trigraphs \
+	-Os $(ARCHFLAGS) -fomit-frame-pointer -fwrapv \
+	$(INCLUDE) -DARM9 -c
 
-CXXFLAGS := $(CFLAGS) -std=c++20 -fno-exceptions -fno-rtti -fno-threadsafe-statics -faligned-new=4
+CXXFLAGS := $(CFLAGS) -std=c++23 -fno-exceptions -fno-rtti -fno-threadsafe-statics -faligned-new=4
 
-LDFLAGS =  -T $(CURDIR)/../symbols.x -T $(CURDIR)/../linker.x -Map $(TARGET).map
+LDFLAGS = --gc-sections -T $(CURDIR)/../symbols.x -T $(CURDIR)/../linker.x -Map $(TARGET).map
 
 ifdef CODEADDR
 	LDFLAGS += -Ttext $(CODEADDR)
 endif
 
-LIBS := -lnds9 -lc
+LIBS := 
 LIBDIRS := $(LIBNDS)  $(DEVKITARM) $(DEVKITARM)/arm-none-eabi
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
@@ -117,7 +119,7 @@ $(OUTPUT).elf: $(OFILES)
 #---------------------------------------------------------------------------------
 %.o: %.s
 	@echo $(notdir $<)
-	$(CC) -MMD -MP -MF $(DEPSDIR)/$*.d -x assembler-with-cpp -c $< -o $@ $(ERROR_FILTER)
+	$(CC) -MMD -MP -MF $(DEPSDIR)/$*.d -x assembler-with-cpp $(ARCHFLAGS) -c $< -o $@ $(ERROR_FILTER)
 
 #---------------------------------------------------------------------------------
 

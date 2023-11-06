@@ -23,14 +23,11 @@ namespace cstd
 	int64_t ldiv(int numerator, int denominator); // returns a Q32 number
 }
 
-extern "C"
-{
-	uint16_t DecIfAbove0_Short(uint16_t& counter); // returns the counter's new value
-	uint8_t DecIfAbove0_Byte(uint8_t& counter);    // returns the counter's new value
-}
-
 bool ApproachLinear(short& counter, short dest, short step); // returns whether the counter reached its destination
 bool ApproachLinear(int& counter,   int dest,   int step);   // returns whether the counter reached its destination
+
+uint16_t CountDownToZero(uint16_t& counter); // returns the counter's new value
+uint8_t  CountDownToZero(uint8_t&  counter); // returns the counter's new value
 
 struct AsRaw {} constexpr as_raw;
 
@@ -142,7 +139,28 @@ struct Fix
 	{
 		return {std::midpoint<int>(f0.val, f1.val), as_raw};
 	}
+
+	static constexpr CRTP<T> pi = []
+	{
+		const int shift = 8 * static_cast<int>(sizeof(T)) - q;
+
+		int64_t raw = 0x3243f6a89ll;
+
+		if (q < 32)
+			raw += 1 << (31 - q);
+
+		return CRTP<T> {raw >> shift, as_raw};
+	}();
 };
+
+template<class T>
+concept FixedPoint = std::is_invocable_v
+	<decltype([]<class U, int q, template<class> class CRTP>
+	requires std::derived_from<CRTP<U>, Fix<U, q, CRTP>>
+	(Fix<U, q, CRTP>&&) {}), T>;
+
+template<FixedPoint T>
+using Underlying = decltype(std::declval<T>().val);
 
 template<FixUR T>
 struct Fix12 : Fix<T, 12, Fix12>
@@ -175,12 +193,6 @@ namespace cstd
 	inline Fix12i sqrt(Fix12i x) { return Fix12i(sqrt(static_cast<uint64_t>(x.val) << 12), as_raw); }
 
 	short atan2(Fix12i y, Fix12i x); //atan2 function, what about 0x020538b8?
-	int abs(int x);
-
-	int strcmp(const char* str1, const char* str2); //returns 0 if equal, a positive number if str1 comes after str2, and a negative number otherwise
-	char* strncpy(char* dest, const char* src, unsigned count);	//Copies n bytes from src to dest and returns a pointer to dest
-	char* strchr(const char* str, char c); //Searches for c in str and returns a pointer to the first occurence, or 0 if c could not be found
-	unsigned strlen(const char* str); //Returns the length of the string or -1 if no null-terminator has been found
 }
 
 struct UnknownStruct
@@ -198,6 +210,19 @@ struct UnknownStruct
 	unsigned unk20;
 };
 
+struct OverlayInfo
+{
+	unsigned ovID;
+	void* loadAddress;
+	unsigned loadSize;
+	unsigned bssSize;
+	void (*staticInitializerBegin)(); // a pointer to the first one
+	void (*staticInitializerEnd)(); // one past the last one, do not dereference
+	unsigned fileID;
+	unsigned unk1c;
+	unsigned unk20; // not from the overlay table, but usually zero
+};
+
 struct Vector3;
 struct Vector3_16;
 struct Matrix4x3;
@@ -210,7 +235,7 @@ extern "C"
 	extern char DIGIT_ENC_ARR[10];
 
 	extern uint16_t HEALTH_ARR[4];
-	extern int UNUSED_RAM[0xec00];
+	extern char UNUSED_RAM_REGION[0x023fc000 - 0x023c4000];
 	extern UnknownStruct UNKNOWN_ARR[4];
 	
 	extern int RNG_STATE; //x => x * 0x0019660d + 0x3c6ef35f
@@ -221,10 +246,15 @@ extern "C"
 
 	extern const Fix12s SINE_TABLE[0x2000];
 	extern const Fix12s ATAN_TABLE[0x400];
-	
+
+	void InitFileSystem();
+	bool LoadOverlay(bool isArm7, unsigned ovID);
+	bool LoadOverlayInfo(OverlayInfo& res, bool isArm7, unsigned ovID);
+	bool LoadArchive(int archiveID);
+	char* LoadFile	(int ov0FileID);
+
 	void UnloadObjBankOverlay(int ovID);
 	bool LoadObjBankOverlay(int ovID);
-	char* LoadFile	(int ov0FileID);
 	
 	[[noreturn]] void Crash();
 
@@ -233,7 +263,8 @@ extern "C"
 	void* AllocateFileSpace(unsigned amount);
 	
 	int ApproachAngle(short& angle, short targetAngle, int invFactor, int maxDelta = 180_deg, int minDelta = 0);
-	short AngleDiff(short ang0, short ang1) __attribute__((const));
+	uint16_t AngleDiff(short ang0, short ang1) __attribute__((const));
+
 	void Vec3_RotateYAndTranslate(Vector3& res, const Vector3& translation, short angY, const Vector3& v); //res and v cannot alias.
 	short Vec3_VertAngle(const Vector3& v1, const Vector3& v0) __attribute__((pure));
 	short Vec3_HorzAngle(const Vector3& v0, const Vector3& v1) __attribute__((pure));
@@ -259,8 +290,8 @@ extern "C"
 	void Vec3_DivScalarInPlace(Vector3& v, Fix12i scalar);
 	void Vec3_MulScalarInPlace(Vector3& v, Fix12i scalar);
 	void Vec3_MulScalar(Vector3& res, const Vector3& v, Fix12i scalar);
-	void Vec3_Sub(Vector3& res, const Vector3& v0, const Vector3& v1); // not as efficient as AddVec3
-	void Vec3_Add(Vector3& res, const Vector3& v0, const Vector3& v1); // not as efficient as SubVec3
+	void Vec3_Sub(Vector3& res, const Vector3& v0, const Vector3& v1); // not as efficient as SubVec3
+	void Vec3_Add(Vector3& res, const Vector3& v0, const Vector3& v1); // not as efficient as AddVec3
 	
 	void Matrix3x3_LoadIdentity(Matrix3x3& mF);
 	void MulVec3Mat3x3(const Vector3& v, const Matrix3x3& m, Vector3& res);
@@ -281,11 +312,30 @@ extern "C"
 	void Matrix3x3_SetRotationX(Matrix3x3& m, Fix12i sinTheta, Fix12i cosTheta) __attribute__((long_call, target("thumb"))); //Resets m to an X rotation matrix
 	void Matrix3x3_SetRotationY(Matrix3x3& m, Fix12i sinTheta, Fix12i cosTheta) __attribute__((long_call, target("thumb"))); //Resets m to a Y rotation matrix
 	void Matrix3x3_SetRotationZ(Matrix3x3& m, Fix12i sinTheta, Fix12i cosTheta) __attribute__((long_call, target("thumb"))); //Resets m to a Z rotation matrix
-	
-	void MultiStore_Int(int val, void* dest, int byteSize);
-	void MultiCopy_Int(void* source, void* dest, int byteSize);
-	
+
 	uint16_t Color_Interp(uint16_t* dummyArg, uint16_t startColor, uint16_t endColor, Fix12i time) __attribute__((const));
+
+	void CpuFill8(void* dest, int val, size_t size);
+	void CpuCopy8(const void* src, void* dest, size_t size);
+
+	void CpuFill16    (short val, void* dest, int numBytes);
+	void CpuFill32    (int   val, void* dest, int numBytes);
+	void CpuFill32Fast(int   val, void* dest, int numBytes);
+
+	void CpuCopy16    (const void* src, void* dest, int numBytes);
+	void CpuCopy32    (const void* src, void* dest, int numBytes);
+	void CpuCopy32Fast(const void* src, void* dest, int numBytes);
+
+	void Copy32Bytes(const void* src, void* dest);
+	void Copy36Bytes(const void* src, void* dest);
+	void Copy48Bytes(const void* src, void* dest);
+
+	// C library functions
+	int abs(int x);
+	int strcmp(const char* str1, const char* str2); // returns 0 if equal, a positive number if str1 comes after str2, and a negative number otherwise
+	char* strncpy(char* dest, const char* src, unsigned count);	// Copies n bytes from src to dest and returns a pointer to dest
+	char* strchr(const char* str, int c); // Searches for c in str and returns a pointer to the first occurence, or 0 if c could not be found
+	unsigned strlen(const char* str); // Returns the length of the string
 }
 
 inline int RandomInt() { return RandomIntInternal(&RNG_STATE); }
@@ -361,6 +411,12 @@ constexpr int Lerp(int a, int b, Fix12i t)
 inline Fix12i Lerp(Fix12i a, Fix12i b, Fix12i t)
 {
 	return t * (b - a) + a;
+}
+
+[[nodiscard]]
+inline Fix12i SmoothStep(Fix12i t)
+{
+	return t * t * (3._f - (t << 1));
 }
 
 struct Vector3
@@ -1643,46 +1699,72 @@ inline const ostream& operator<<(const ostream& os, Fix12<T> fix)
 
 inline const ostream& operator<<(const ostream& os, const Vector3& vec)
 {
-	os.set_buffer("{0x%r0%_f, 0x%r1%_f, 0x%r2%_f}");
-	os.flush(vec.x.val, vec.y.val, vec.z.val);
+	os.set_buffer("{+0x%r0%_f, +0x%r1%_f, +0x%r2%_f}");
+
+	os.flush(
+		os.update_sign(vec.x.val, 1),
+		os.update_sign(vec.y.val, 12),
+		os.update_sign(vec.z.val, 23)
+	);
 
 	return os;
 }
 
 inline const ostream& operator<<(const ostream& os, const Vector3_16f& vec)
 {
-	os.set_buffer("{0x%r0%_fs, 0x%r1%_fs, 0x%r2%_fs}");
-	os.flush(vec.x.val, vec.y.val, vec.z.val);
+	os.set_buffer("{+0x%r0%_fs, +0x%r1%_fs, +0x%r2%_fs}");
+
+	os.flush(
+		os.update_sign(vec.x.val, 1),
+		os.update_sign(vec.y.val, 13),
+		os.update_sign(vec.z.val, 25)
+	);
 
 	return os;
 }
 
 inline const ostream& operator<<(const ostream& os, const Vector3_16& vec)
 {
-	os.set_buffer("{0x%r0%, 0x%r1%, 0x%r2%}");
-	os.flush(vec.x, vec.y, vec.z);
+	os.set_buffer("{+0x%r0%, +0x%r1%, +0x%r2%}");
+
+	os.flush(
+		os.update_sign(vec.x, 1),
+		os.update_sign(vec.y, 10),
+		os.update_sign(vec.z, 19)
+	);
 
 	return os;
 }
 
 inline const ostream& operator<<(const ostream& os, const Matrix4x3& m)
 {
-	os.set_buffer("[ 0x%r0%_f  0x%r1%_f  0x%r2%_f  0x%r3%_f ]\n");
+	os.set_buffer("[ +0x%r0%_f +0x%r1%_f +0x%r2%_f +0x%r3%_f ]\n");
 
-	os.flush(m.c0.x.val, m.c1.x.val, m.c2.x.val, m.c3.x.val);
-	os.flush(m.c0.y.val, m.c1.y.val, m.c2.y.val, m.c3.y.val);
-	os.flush(m.c0.z.val, m.c1.z.val, m.c2.z.val, m.c3.z.val);
+	for (auto r : {&Vector3::x, &Vector3::y, &Vector3::z})
+	{
+		os.flush(
+			os.update_sign((m.c0.*r).val, 2),
+			os.update_sign((m.c1.*r).val, 12),
+			os.update_sign((m.c2.*r).val, 22),
+			os.update_sign((m.c3.*r).val, 32)
+		);
+	}
 
 	return os;
 }
 
 inline const ostream& operator<<(const ostream& os, const Matrix3x3& m)
 {
-	os.set_buffer("[ 0x%r0%_f  0x%r1%_f  0x%r2%_f ]\n");
+	os.set_buffer("[ +0x%r0%_f +0x%r1%_f +0x%r2%_f ]\n");
 
-	os.flush(m.c0.x.val, m.c1.x.val, m.c2.x.val);
-	os.flush(m.c0.y.val, m.c1.y.val, m.c2.y.val);
-	os.flush(m.c0.z.val, m.c1.z.val, m.c2.z.val);
+	for (auto r : {&Vector3::x, &Vector3::y, &Vector3::z})
+	{
+		os.flush(
+			os.update_sign((m.c0.*r).val, 2),
+			os.update_sign((m.c1.*r).val, 12),
+			os.update_sign((m.c2.*r).val, 22)
+		);
+	}
 
 	return os;
 }

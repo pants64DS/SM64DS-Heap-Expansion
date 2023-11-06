@@ -2,32 +2,53 @@
 #include <new>
 #include <array>
 
-constexpr bool momOverlayExists = false; // Set this to true when using MOM
+// Set this to true if your hack uses the More Objects Mod, or if you aren't sure if it does.
+// Only set it to false if you're certain that it doesn't.
+#define MOM_OVERLAY_MAY_EXIST true
 
-constexpr unsigned unusedRegionStart = 0x023c4000;
-constexpr unsigned unusedRegionEnd   = 0x023ff000;
-constexpr unsigned momOverlayStart   = 0x023ec400;
-
-constexpr unsigned extraHeapEnd = momOverlayExists ? momOverlayStart : unusedRegionEnd;
-constexpr unsigned extraHeapSize = extraHeapEnd - unusedRegionStart - sizeof(ExpandingHeap);
-
-class MultiHeap : public ExpandingHeap
+struct BaseWithoutMOM
 {
-	static std::array<char, sizeof(ExpandingHeap) + extraHeapSize> storage;
+	static constexpr char* extraHeapStorage = UNUSED_RAM_REGION;
+	static constexpr unsigned extraHeapSize = sizeof(UNUSED_RAM_REGION) - sizeof(ExpandingHeap);
+};
 
-	static ExpandingHeap& GetExtraHeap()
+struct BaseWithMOM
+{
+	char* extraHeapStorage = BaseWithoutMOM::extraHeapStorage;
+	unsigned extraHeapSize = BaseWithoutMOM::extraHeapSize;
+
+	BaseWithMOM()
 	{
-		return *std::launder(reinterpret_cast<ExpandingHeap*>(storage.begin()));
+		InitFileSystem();
+
+		OverlayInfo ovInfo;
+		const bool momExists = LoadOverlayInfo(ovInfo, false, 155);
+
+		if (momExists)
+		{
+			const unsigned momOverlaySize = ovInfo.loadSize + ovInfo.bssSize;
+
+			extraHeapStorage += momOverlaySize;
+			extraHeapSize -= momOverlaySize;
+		}
+	}
+};
+
+class MultiHeap : public ExpandingHeap, std::conditional_t<MOM_OVERLAY_MAY_EXIST, BaseWithMOM, BaseWithoutMOM>
+{
+	ExpandingHeap& GetExtraHeap()
+	{
+		return *std::launder(reinterpret_cast<ExpandingHeap*>(extraHeapStorage));
 	}
 
-	static bool IsInExtraHeap(void* ptr)
+	bool IsInExtraHeap(const void* ptr)
 	{
-		static constexpr auto less = std::less<void*>{};
+		static constexpr auto less = std::less<const void*>{};
 
-		return !less(ptr, storage.begin()) && less(ptr, storage.end());
+		return !less(ptr, extraHeapStorage) && less(ptr, extraHeapStorage + extraHeapSize);
 	}
 
-	ExpandingHeap& GetHeap(void* ptr)
+	ExpandingHeap& GetHeap(const void* ptr)
 	{
 		if (IsInExtraHeap(ptr))
 			return GetExtraHeap();
@@ -69,7 +90,7 @@ public:
 		return GetHeap(ptr).ExpandingHeap::VReallocate(ptr, newSize);
 	}
 
-	virtual unsigned VSizeof(void* ptr) override
+	virtual unsigned VSizeof(const void* ptr) override
 	{
 		return GetHeap(ptr).ExpandingHeap::VSizeof(ptr);
 	}
@@ -99,15 +120,18 @@ public:
 MultiHeap::MultiHeap(void* start, unsigned size, Heap* root, ExpandingHeapAllocator* allocator):
 	ExpandingHeap(start, size, root, allocator)
 {
-	void* const extraHeapStart = storage.begin() + sizeof(ExpandingHeap);
+	void* const extraHeapStart = extraHeapStorage + sizeof(ExpandingHeap);
 	auto* extraHeapAllocator = Heap::CreateExpandingHeapAllocator(extraHeapStart, extraHeapSize, 3);
 
 	if (!extraHeapAllocator) Crash();
 
-	new (storage.begin()) ExpandingHeap(extraHeapStart, extraHeapSize, nullptr, extraHeapAllocator);
+	new (extraHeapStorage) ExpandingHeap(extraHeapStart, extraHeapSize, nullptr, extraHeapAllocator);
 }
 
-asm(R"(
-_ZN9MultiHeap7storageE = 0x023c4000 @ the start of the unused region
-repl_0203c948 = _ZN9MultiHeapC1EPvjP4HeapP22ExpandingHeapAllocator
-)");
+#if MOM_OVERLAY_MAY_EXIST
+
+asm("nsub_0201a0d8 = 0x0201a0dc");
+
+#endif
+
+asm("repl_0203c948 = _ZN9MultiHeapC1EPvjP4HeapP22ExpandingHeapAllocator");

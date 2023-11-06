@@ -37,6 +37,7 @@ extern "C"
 	extern LevelFile::View (*VIEW_ARR_PTR)[];
 	extern LevelFile::Entrance (*ENTRANCE_ARR_PTR)[];
 	extern LevelFile::Path (*PATH_ARR_PTR)[];
+	extern Vector3_16 (*PATH_NODE_ARR_PTR)[];
 
 	extern uint8_t LAST_ENTRANCE_ID;
 	extern uint8_t NUM_ENTRANCES;
@@ -88,11 +89,6 @@ struct PathPtr
 
 namespace LevelFile
 {
-	struct PathNode
-	{
-		Vector3_16 pos;
-	};
-	
 	struct Path
 	{
 		uint16_t firstNodeID;

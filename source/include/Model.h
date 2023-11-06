@@ -352,8 +352,12 @@ struct Material
 		polygonAttr |= (polygonID & 0x3f) << 24;
 	}
 
-	constexpr void EnableFog () { polygonAttr |=  (1 << 15); }
-	constexpr void DisableFog() { polygonAttr &= ~(1 << 15); }
+	constexpr void ShowBackSide () { polygonAttr |=  (1 << 6); }
+	constexpr void HideBackSide () { polygonAttr &= ~(1 << 6); }
+	constexpr void ShowFrontSide() { polygonAttr |=  (1 << 7); }
+	constexpr void HideFrontSide() { polygonAttr &= ~(1 << 7); }
+	constexpr void EnableFog    () { polygonAttr |=  (1 << 15); }
+	constexpr void DisableFog   () { polygonAttr &= ~(1 << 15); }
 };
 
 struct ModelComponents
