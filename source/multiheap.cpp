@@ -9,13 +9,11 @@
 struct BaseWithoutMOM
 {
 	static constexpr char* extraHeapStorage = UNUSED_RAM_REGION;
-	static constexpr unsigned extraHeapSize = sizeof(UNUSED_RAM_REGION) - sizeof(ExpandingHeap);
 };
 
 struct BaseWithMOM
 {
-	char* extraHeapStorage = BaseWithoutMOM::extraHeapStorage;
-	unsigned extraHeapSize = BaseWithoutMOM::extraHeapSize;
+	static inline char* extraHeapStorage = UNUSED_RAM_REGION;
 
 	BaseWithMOM()
 	{
@@ -29,23 +27,24 @@ struct BaseWithMOM
 			const unsigned momOverlaySize = ovInfo.loadSize + ovInfo.bssSize;
 
 			extraHeapStorage += momOverlaySize;
-			extraHeapSize -= momOverlaySize;
 		}
 	}
 };
 
 class MultiHeap : public ExpandingHeap, std::conditional_t<MOM_OVERLAY_MAY_EXIST, BaseWithMOM, BaseWithoutMOM>
 {
-	ExpandingHeap& GetExtraHeap()
+	static constexpr char* extraHeapEnd = std::end(UNUSED_RAM_REGION);
+
+	static ExpandingHeap& GetExtraHeap()
 	{
 		return *std::launder(reinterpret_cast<ExpandingHeap*>(extraHeapStorage));
 	}
 
-	bool IsInExtraHeap(const void* ptr)
+	static bool IsInExtraHeap(const void* ptr)
 	{
-		static constexpr auto less = std::less<const void*>{};
+		static constexpr std::less<const void*> less = {};
 
-		return !less(ptr, extraHeapStorage) && less(ptr, extraHeapStorage + extraHeapSize);
+		return !less(ptr, extraHeapStorage) && less(ptr, extraHeapEnd);
 	}
 
 	ExpandingHeap& GetHeap(const void* ptr)
@@ -120,13 +119,17 @@ public:
 MultiHeap::MultiHeap(void* start, unsigned size, Heap* root, ExpandingHeapAllocator* allocator):
 	ExpandingHeap(start, size, root, allocator)
 {
-	void* const extraHeapStart = extraHeapStorage + sizeof(ExpandingHeap);
+	char* const extraHeapStart = extraHeapStorage + sizeof(ExpandingHeap);
+	const unsigned extraHeapSize = extraHeapEnd - extraHeapStart;
+
 	auto* extraHeapAllocator = Heap::CreateExpandingHeapAllocator(extraHeapStart, extraHeapSize, 3);
 
 	if (!extraHeapAllocator) Crash();
 
 	new (extraHeapStorage) ExpandingHeap(extraHeapStart, extraHeapSize, nullptr, extraHeapAllocator);
 }
+
+static_assert(sizeof(MultiHeap) == sizeof(ExpandingHeap));
 
 #if MOM_OVERLAY_MAY_EXIST
 
