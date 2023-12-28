@@ -1,6 +1,6 @@
 # SM64DS Heap Expansion
 
-In Super Mario 64 DS, there is an unused memory region of 224 kilobytes.\* This patch turns that into allocatable heap memory. Only compatible with the European version of the game.
+In Super Mario 64 DS, multiple memory regions are left unused, the biggest of which is 224 kilobytes.\* This patch turns those into allocatable heap memory. Only compatible with the European version of the game.
 
 #### Installation for an existing project that uses NSMBe patches
 
@@ -30,6 +30,6 @@ In Super Mario 64 DS, there is an unused memory region of 224 kilobytes.\* This 
    
    * If that doesn't work, make sure you have [devkitPro](https://devkitpro.org) properly installed
 
-<sub>\*The game itself probably has even more, but some of it is used by flashcards</sub>
+<sub>\*This region actually has even more, but some of it is used by flashcards</sub>
 
 <sub>\*\*If the ROM uses MOM, it definitely has inserted code, even if you didn't insert it.</sub>
